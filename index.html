@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Especificação de Arquitetura - Aba Negociações (PT Only)</title>
+    <title>Especificação de Arquitetura - Aba Negociações (PT Only) - V5.6 Final de Produção</title>
     <style>
         :root {
             --bg-main: #f4f6fa;
@@ -58,175 +58,267 @@
         
         .note { background-color: var(--accent-light); border-left: 4px solid var(--accent); padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
         .warning { background-color: #fff7ed; border-left: 4px solid #ea580c; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
-        .math-block { text-align: center; margin: 15px 0; padding: 12px; background-color: var(--math-bg); border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: bold; font-family: "Times New Roman", Times, serif; }
+        .math-block { text-align: left; margin: 15px 0; padding: 16px; background-color: var(--math-bg); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: monospace; white-space: pre-line; }
+        .footer-note { font-size: 11px; color: var(--text-muted); margin-top: 50px; border-top: 1px dashed var(--border); padding-top: 10px; }
     </style>
 </head>
 <body>
 
     <div class="header-banner">
-        <div class="subtitle">Documento de Especificação Técnica de Requisitos e Sistema (SRS)</div>
-        <h1>Módulo de Negociações Meta-Orientado (PT Only)</h1>
+        <div class="subtitle">Software Requirements Specification (SRS) - V5.6 PROD CONGELADO</div>
+        <h1>Módulo de Negociações: Algoritmo de Minimização do Desvio da Meta (Target Yield Deviation Minimization)</h1>
     </div>
 
-    <h2>1. Visão Geral da Arquitetura</h2>
-    <p>A arquitetura da nova aba <strong>"Negociações"</strong> foi projetada como um motor analítico e transacional reativo acoplado ao ecossistema Pendle na Arbitrum. O sistema opera em um fluxo unidirecional composto por três camadas lógicas:</p>
+    <h2>1. Visão Geral e Princípio Operacional</h2>
+    <p>O sub-sistema de Negociações do Agente Pendle opera sob o arcabouço matemático de <strong>Minimização do Desvio da Meta (Target Yield Deviation Minimization)</strong>. O motor rejeita a maximização cega de rendimento bruto (APY) para atuar como um piloto automático reativo, cujo único objetivo é reduzir o desvio absoluto da carteira em relação ao alvo macro de 13.00% aa.</p>
     
-    <ul>
-        <li><strong>Camada de Ingestão de Dados (Data Ingestion):</strong> Consome em tempo real via RPC MEV-Shielded e Subgraph os saldos da carteira do usuário (AUM) e os dados de mercado das pools Pendle (Fixed APYs e Maturidades).</li>
-        <li><strong>Motor de Decisão e Otimização (Core Engine):</strong> Centraliza as regras matemáticas meta-orientadas e os limites de segurança estruturais (guardrails de 50% para Swap e 20% para Buy).</li>
-        <li><strong>Camada de Simulação e Projeção (UI/UX State):</strong> Renderiza o impacto futuro da carteira antes da assinatura on-chain, evidenciando o deslocamento do portfólio em direção ao alvo estipulado.</li>
-    </ul>
-
-    <pre>
-┌────────────────────────┐      ┌─────────────────────────┐      ┌────────────────────────┐
-│  Pendle API / Subgraph │      │   Carteira do Usuário   │      │   Configurações Core   │
-│ (Fixed APY / Maturity) │      │ (Saldos Atuais/Caixa/PT)│      │  (Meta Global: 13% aa) │
-└───────────┬────────────┘      └────────────┬────────────┘      └───────────┬────────────┘
-            │                                │                               │
-            └───────────────────────┬────────┴───────────────────────────────┘
-                                    ▼
-                      ┌─────────────────────────────┐
-                      │  NegotiationEngine (Core)   │
-                      │ ├─ Verificador de Guardrails│
-                      │ └─ Simulador de Impacto Meta│
-                      └─────────────┬───────────────┘
-                                    ▼
-                      ┌─────────────────────────────┐
-                      │ Dashboard / Interface UI    │
-                      │ (Cards Dinâmicos Swap/Buy)  │
-                      └─────────────────────────────┘
-    </pre>
-
-    <h2>2. Estrutura de Dados e Motores Cripto (Backend)</h2>
-    <p>O backend utiliza um motor analítico focado em **Média Ponderada de Rendimento** acoplado a regras rígidas de barreira (Circuit Breakers/Guardrails). O objetivo principal é manter o portfólio direcionado à meta de 13.00% aa.</p>
-
-    <h3>2.1. Regras de Negócio e Controle de Risco (Guardrails)</h3>
-    <ul>
-        <li><strong>Swap Gate:</strong> Limita o valor máximo da sugestão a <code>50%</code> do capital atualmente imobilizado em outras posições de PT. O motor varre e seleciona para descarte preferencial as pools com menor rendimento ou cujas curvas de decaimento de liquidez (PDS) degradaram.</li>
-        <li><strong>Buy Gate:</strong> Limita o valor sugerido para compras via capital livre (caixa/stablecoins) a no máximo <code>20%</code> do AUM total do portfólio.</li>
-    </ul>
-
-    <h3>2.2. Formulação Matemática do Motor</h3>
-    <p>O rendimento consolidado da carteira é recalculado dinamicamente a cada simulação através da fórmula:</p>
-    <div class="math-block">
-        APY_{Portfolio} = \sum_{i=1}^{n} \left( \frac{Valor\_Alocado_i}{AUM\_Total} \times Fixed\_APY_i \right)
+    <div class="note">
+        <strong>Definição de Desvio de Alvo (Esforço):</strong><br>
+        O desvio é a distância percentual absoluta entre o rendimento ponderado atual do portfólio e a meta. O motor busca mitigar essa distância a cada iteração, priorizando custos de fricção (gas/slippage), profundidade de execução e blindagem de risco.
     </div>
 
-    <p>O <strong>Ganho Real Líquido ($\Delta_{Net}$)</strong> de uma troca de ativos calcula o diferencial de rendimento projetado até a data de vencimento, subtraindo os custos friccionais de rede:</p>
-    <div class="math-block">
-        Ganho\_Real = (Valor\_Swap \times APY_{Nova} \times t) - (Valor\_Swap \times APY_{Atual} \times t) - C_{Saída}
-    </div>
-    <p>Onde <code>t = Dias_Restantes_Maturidade / 365</code> e <code>C_Saída</code> representa o somatório do Gas da rede mais o slippage gerado na desmontagem.</p>
-
-    <h3>2.3. Lógica de Roteamento Multihop (Pendle Router)</h3>
-    <p>Como as pools do Pendle não possuem swaps diretos do tipo <code>PT_A ➔ PT_B</code>, o motor cripto monta e codifica em lote (Multicall) a seguinte rota atômica de contratos inteligentes:</p>
-    <pre>
-[PT_Origem] ➔ swapExactPtForToken() ➔ [Underlying Asset / SY] ➔ swapExactTokenForPt() ➔ [PT_Destino]
-    </pre>
-
-    <h2>3. Especificação dos Endpoints & Integrações (Pendle)</h2>
-    <p>O Agente precisará consumir as seguintes interfaces de dados estruturados para alimentar o motor analítico:</p>
-
-    <h3>3.1. Subgraph / API GraphQL da Pendle (Dados de Mercado)</h3>
-    <p>Para buscar as condições em tempo real dos mercados elegíveis da rede Arbitrum:</p>
-    <pre>
-query GetPendleMarkets {
-  markets(where: { chainId: 42161, isExpired: false }) {
-    id
-    ptAddress
-    expiry
-    ptPricing {
-      fixedApy
-      impliedApy
-    }
-    underlyingAsset {
-      id
-      symbol
-    }
-  }
-}
-    </pre>
-
-    <h3>3.2. Contrato Inteligente On-Chain (Pendle Router V4)</h3>
-    <p>Para estimar o custo exato de saída de uma PT e entrada na nova (simulação de Slippage), o backend deve fazer chamadas estáticas (<code>eth_call</code>) nos métodos de leitura do Router oficial (Bypass de transação):</p>
+    <h2>2. Constantes Estruturais e Parâmetros Regulatórios</h2>
     <ul>
-        <li><code>IAllActionV3.simRedeemPyToToken.call(...)</code>: Retorna o volume exato recebido do ativo base ao queimar a PT antiga.</li>
-        <li><code>IAllActionV3.simMintPyFromToken.call(...)</code>: Retorna a quantidade exata de novas PTs obtidas na pool recomendada com base nos tokens da primeira etapa.</li>
+        <li><code>TARGET_APY = 0.1300</code> (Meta estatística de 13.00% aa)</li>
+        <li><code>TARGET_APY_BAND = [0.1270, 0.1330]</code> (Banda Nominal de Não-Ação)</li>
+        <li><code>MIN_TARGET_IMPROVEMENT_BPS = 15</code> (Melhoria mínima necessária para execução = 15 bps ou 0.15%)</li>
+        <li><code>MIN_DAYS_TO_MATURITY = 14</code> (Maturidade mínima para novos candidatos a PT, exceto desvios macro &gt; 2.00%)</li>
+        <li><code>SWAP_MAX_GATE = 0.50</code> (Limite máximo de 50% de desalocação da pool PT de origem)</li>
+        <li><code>BUY_MAX_GATE_DEFAULT = 0.20</code> (Limite padrão de uso de 20% do caixa livre)</li>
+        <li><code>BUY_MAX_GATE_MAX_OVERRIDE = 0.35</code> (Teto máximo absoluto de proteção para expansão de caixa)</li>
+        <li><code>LARGE_WALLET_THRESHOLD_USD = 100000.00</code> (Gatilho para fragmentação de ordem via DCA)</li>
+        <li><code>LIQUIDITY_SAFETY_FACTOR = 0.10</code> (Limite máximo de impacto de 10% sobre a liquidez útil da pool de destino)</li>
+        <li><code>SLIPPAGE_TOLERANCE_PCT = 0.005</code> (0.5% definido como limite padrão para a simulação de quote no Router)</li>
+        <li><code>SLIPPAGE_VETO_THRESHOLD_PCT = 0.010</code> (1.0% definido como o disjuntor de Slippage Real Máximo)</li>
     </ul>
 
-    <h2>4. Interface do Usuário (UI/UX Dashboard)</h2>
-    <p>A interface do dashboard apresenta indicadores macro orientados à meta do usuário e cards segregados para as operações.</p>
+    <h3>2.1. Filtro Assimétrico de Zona de Histerese</h3>
+    <div class="note">
+        • <strong>Se Portfolio APY cair abaixo de 12.70%:</strong> O motor sai do repouso e só retorna à hibernação quando o portfólio atingir <strong>&ge; 13.05% aa</strong>.<br>
+        • <strong>Se Portfolio APY subir acima de 13.30%:</strong> O motor ativa rebalanceamentos redutores de risco e só retorna à hibernação quando o portfólio recuar para <strong>&le; 12.95% aa</strong>.
+    </div>
 
+    <h2>3. Definições Formais e Mapeamento Matemático Core</h2>
+    <div class="math-block">
+<strong>[ESPECIFICAÇÃO MATEMÁTICA DEFINITIVA - BACKEND V5.6]</strong>
+
+1. Portfolio APY (Média Ponderada por AUM):
+   <code>portfolio_apy = Σ(wi × safe_projection_apy_i)</code>
+   onde:
+   <code>wi = position_value_usd_i / total_aum_usd</code>
+   Restrição: <code>Σwi = 1.0</code>
+
+2. Projeção Conservadora Definitiva (safe_projection_apy_i):
+   <code>safe_projection_apy_i = min(subgraph_fixed_apy_i, implied_apy_spot_i)</code>
+   onde:
+   - <code>subgraph_fixed_apy_i</code> = Taxa de rendimento declarada na API de indexação da Pendle.
+   - <code>implied_apy_spot_i</code> = APY real derivado do preço on-chain spot:
+     <code>implied_apy_spot_i = ((redemption_value_i / spot_market_price_pt_i) - 1) * (365 / days_to_maturity_i)</code>
+   
+   <em>Definição de Ativo de Resgate (redemption_value_i):</em> Representa o valor de resgate por unidade de PT no vencimento, normalizado no ativo de contabilização da pool (ex: 1.0 para USDC/stablecoins; taxa do ativo de lastro subjacente para LSTs via oráculo Pendle).
+
+3. Action Gaps (Vetor de Distância e Direção):
+   <code>action_gap_abs = abs(TARGET_APY - portfolio_apy)</code>
+   <code>action_gap_signed = TARGET_APY - portfolio_apy</code>
+
+4. Improvement em Pontos Base (BPS):
+   <code>rebalance_improvement_bps = (action_gap_abs_before - action_gap_abs_after) × 10,000</code>
+
+5. Maturity Factor (Penalização Temporal para Vencimentos Curtos):
+   <code>MF = min(1.0, days_to_maturity / 30)</code>
+   <code>adjusted_yield_impact = (safe_projection_apy_candidate - TARGET_APY) × wi × MF</code>
+    </div>
+
+    <h3>3.1. Matriz de Liquidez Efetiva da Rota e Ações Restritivas</h3>
+    <p>Fica terminantemente proibido o uso do TVL nominal da pool Pendle como proxy de profundidade. O backend deve mapear a liquidez disponível real do par específico na rota <code>PT &harr; SY/Underlying Token</code> no Router V4 (<code>effective_route_liquidity_usd</code>), aplicando as seguintes diretrizes estritas:</p>
+    
     <table>
         <thead>
             <tr>
-                <th>Métrica de Portfólio</th>
-                <th>Estado Atual</th>
-                <th>Estado Projetado (Pós-Negociação)</th>
+                <th>Liquidez Efetiva da Rota (USD)</th>
+                <th>Score</th>
+                <th>Ação Restritiva e Controle de Fluxo</th>
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td><strong>AUM Total</strong></td>
-                <td>$ 50,000.00</td>
-                <td>$ 49,935.00 <small>(Ajustado taxas de slippage)</small></td>
+                <td><strong>&gt; $5,000,000</strong></td>
+                <td><code>1.0</code></td>
+                <td>Permitir e recomendar normalmente. Sem alertas. <code>max_allowed_pct_of_aum = 1.00</code></td>
             </tr>
             <tr>
-                <td><strong>APY Consolidado da Carteira</strong></td>
-                <td><span style="color: var(--state-alert); font-weight: bold;">11.85% aa</span></td>
-                <td><span style="color: var(--state-success); font-weight: bold;">12.38% aa</span> <small>(+0.53% de impacto positivo)</small></td>
+                <td><strong>$1,000,000 - $5,000,000</strong></td>
+                <td><code>0.7</code></td>
+                <td>Permitir operação. Backend deve injetar a flag: <br><code>ui_warning = "Liquidez adequada, mas pool com menos de $5M - recomendado monitoramento"</code>. <code>max_allowed_pct_of_aum = 1.00</code></td>
             </tr>
             <tr>
-                <td><strong>Meta Estabelecida</strong></td>
-                <td>13.00% aa</td>
-                <td>Diferença para o alvo: <strong>-0.62%</strong></td>
+                <td><strong>$500,000 - $1,000,000</strong></td>
+                <td><code>0.4</code></td>
+                <td>Ativar limite proporcional de segurança patrimonial: <br><code>max_allowed_pct_of_aum = 0.05</code>. Injetar flag: <br><code>ui_warning = "Liquidez moderada - operação limitada a 5% do portfólio"</code></td>
+            </tr>
+            <tr>
+                <td><strong>&lt; $500,000</strong></td>
+                <td><code>0.0</code></td>
+                <td><strong>Veto Atômico Imediato:</strong> Abortar pipeline e retornar erro <code>POOL_LOW_LIQUIDITY</code>.</td>
             </tr>
         </tbody>
     </table>
 
-    <div class="note">
-        <strong>Card Interno: Operação de SWAP (Teto 50%)</strong><br>
-        🤖 Sugestão: Desmontar $10.000,00 da posição atual menos eficiente em PT-stETH para aplicar na pool recomendada PT-eETH.<br>
-        Projeções Incrementais: <strong>Semana:</strong> +$6.20 | <strong>Mês:</strong> +$25.80 | <strong>Até Vencimento:</strong> +$310.00
+    <h3>3.2. Circuit Breakers Dinâmicos e Regra de Sizing (suggested_value_usd)</h3>
+    <p>O motor subdivide o teto máximo absoluto de alocação dependendo do tipo de execução e consolba o tamanho final da ordem seguindo estritamente a intersecção inferior das restrições:</p>
+    
+    <div class="math-block">
+A) Teto Máximo para Operações de COMPRA (Candidato BUY com saldo de caixa):
+   <code>max_buy_value_usd = min(cash_balance × active_buy_max_gate, effective_route_liquidity_usd × LIQUIDITY_SAFETY_FACTOR, total_aum_usd × max_allowed_pct_of_aum)</code>
+
+B) Teto Máximo para Operações de TROCA (Candidato SWAP parcial entre posições PT):
+   <code>max_swap_value_usd = min(origin_position_value_usd × SWAP_MAX_GATE, effective_route_liquidity_usd × LIQUIDITY_SAFETY_FACTOR, total_aum_usd × max_allowed_pct_of_aum)</code>
+
+C) Fórmula de Dimensionamento do Valor Sugerido (Sizing):
+   <code>suggested_value_usd = min(max_buy_value_usd, max_swap_value_usd, optimizer_recommended_value_usd)</code>
+   
+   onde:
+   - <code>optimizer_recommended_value_usd</code> = É o valor exato calculado pelo motor que minimiza o desvio absoluto (<code>action_gap_abs</code>) descontados os custos friccionais de execução (gas e derrapagem em dólares).
     </div>
 
-    <div class="note">
-        <strong>Card Interno: Operação de BUY (Teto 20%)</strong><br>
-        🤖 Sugestão: Alocar $5.000,00 do saldo ocioso em caixa diretamente na pool recomendada PT-eETH (Fixed APY: 14.20%).
+    <h2>4. Matriz de Mapeamento de Risco (Risk Tier Guardrail)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Camada (Tier)</th>
+                <th>Tokens e Ativos Subjacentes Elegíveis</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Tier 1 (Risco Baixo)</strong></td>
+                <td><code>USDC</code>, <code>USDT</code>, <code>DAI</code>, <code>FRAX</code> (Stablecoins Blue-Chip)</td>
+            </tr>
+            <tr>
+                <td><strong>Tier 2 (Risco Moderado)</strong></td>
+                <td><code>wstETH</code>, <code>rETH</code>, <code>sDAI</code>, <code>sUSDC</code> (LSTs ou Stables com Yield nativo)</td>
+            </tr>
+            <tr>
+                <td><strong>Tier 3 (Risco Elevado)</strong></td>
+                <td>Qualquer ativo fora do Tier 1 ou Tier 2, ativos sintéticos sem auditoria pública ou pools com menos de 30 dias de criação on-chain.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="warning">
+        <strong>Regra de Veto de Risco:</strong> É proibido realizar swaps que aumentem a camada de risco da carteira (ex: Tier 1 ➔ Tier 3), exceto se o ganho de eficiência no rebalanceamento compensar substancialmente a exposição adicional de crédito/mercado:<br>
+        <code>if (target_tier &gt; current_tier) and (rebalance_improvement_bps &lt; 50): veto("RISK_INCREASE_WITHOUT_SIGNIFICANT_GAIN")</code>
     </div>
 
-    <h2>5. Estrutura de Resposta de Dados (Payload JSON de Produção)</h2>
-    <p>Estrutura padrão que o backend trafegará para atualizar os estados visuais da tela de negociações:</p>
+    <h2>5. Execução Avançada, Filtro de Slippage e Regras de Invalidação de DCA</h2>
+    <p>Para carteiras classificadas como de grande volume (<code>AUM &gt; LARGE_WALLET_THRESHOLD_USD</code>), o motor ativa nativamente a estratégia <code>DCA_SPLIT</code>, fracionando o lote em transações sequenciais espaçadas. Toda ordem fragmentada fica submetida à seguinte política rígida de segurança:</p>
+
+    <div class="note">
+        <strong>Filtro Atômico de Slippage Real:</strong> antes de disponibilizar a assinatura da transação, o backend simula o quote on-chain. Se violado o limite estrito, a operação aborta:<br>
+        <code>if (simulated_slippage_pct &gt; SLIPPAGE_VETO_THRESHOLD_PCT): veto("SLIPPAGE_TOO_HIGH")</code>
+    </div>
+
+    <div class="warning">
+        <strong>Regra de Invalidação de DCA:</strong> Cada parcela futura de uma ordem fracionada deve obrigatoriamente passar por re-simulação síncrona no exato momento de sua execução planejada on-chain. A fila restante de execução será automaticamente cancelada (<code>CANCEL_REMAINING_SPLITS</code>) se:<br>
+        1. O <code>simulation_nonce</code> expirar (<code>simulation_nonce_expiry_seconds &gt; 3600</code>).<br>
+        2. O mercado sofrer desvio acima da tolerância permitida (<code>market_drift_tolerance_bps &gt; 10</code>).<br>
+        3. Qualquer guardrail estrutural de risco, slippage ou liquidez for violado durante a janela de espera.
+    </div>
+
+    <h2>6. Interface do Usuário (UI/UX) e Rastreabilidade</h2>
+    <h3>6.1. Dicionário Definitivo de Erros e Mensagens Human-Readable</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Código Interno (Payload)</th>
+                <th>Mensagem Front-End para o Usuário</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td><code>WITHIN_NO_ACTION_BAND</code></td><td>"Sua carteira já está na banda ideal de rendimento (12,70% a 13,30% ao ano)."</td></tr>
+            <tr><td><code>INSUFFICIENT_BPS_GAIN</code></td><td>"O ganho estimado de aproximação à meta (&lt;0,15%) não compensa os custos de rede."</td></tr>
+            <tr><td><code>SLIPPAGE_TOO_HIGH</code></td><td>"A volatilidade ou impacto de preço no mercado está muito alto no momento. Tente novamente em 1 hora."</td></tr>
+            <tr><td><code>POOL_LOW_LIQUIDITY</code></td><td>"A pool recomendada possui liquidez de tela insuficiente para garantir uma execução segura."</td></tr>
+            <tr><td><code>RISK_INCREASE_WITHOUT_SIGNIFICANT_GAIN</code></td><td>"Operação vetada: O aumento do risco de crédito/colateral não justifica o ganho marginal de APY."</td></tr>
+            <tr><td><code>CASH_GATE_EXCEEDED</code></td><td>"A operação violaria as travas de segurança de alocação de caixa do portfólio."</td></tr>
+            <tr><td><code>RATE_LIMIT_EXCEEDED</code></td><td>"Limite de operações diárias atingido. Aguarde o tempo de recarga de segurança."</td></tr>
+        </tbody>
+    </table>
+
+    <h2>7. Payload JSON de Produção Homologado (V5.6)</h2>
     <pre>
 {
   "timestamp": 1780599000,
+  "simulation_nonce": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
   "operation_type": "SWAP",
-  "meta_target_apy": 0.13,
-  "current_portfolio_apy": 0.1185,
-  "projected_portfolio_apy": 0.1238,
-  "guardrails": {
-    "max_allowed_value_usd": 12500.00,
-    "suggested_value_usd": 10000.00,
-    "is_within_limits": true
+  "audit_trail": {
+    "decision_id": "0x7a8f3b2c9e1d4b8a9dd2b0d7b3dcb6d5f1e2a3b4c5d6e7f8a9b0c1d2e3f4a5b6",
+    "backend_version": "v5.6.0-prod",
+    "model_inputs_hash": "0x4e5f6a7b8c9d0e1f",
+    "human_override_available": true
   },
-  "asset_routing": {
-    "source_pt": "0x_pt_steth_address",
-    "target_pt": "0x_pt_eeth_address",
-    "intermediate_token": "0x_weth_address"
+  "portfolio_metrics": {
+    "total_aum_usd": 120000.00,
+    "current_portfolio_apy": 0.1185,
+    "projected_portfolio_apy": 0.1238
+  },
+  "target_optimization": {
+    "target_apy": 0.1300,
+    "action_gap_abs_before": 0.0115,
+    "action_gap_abs_after": 0.0062,
+    "action_gap_signed_before": 0.0115,
+    "action_gap_signed_after": 0.0062,
+    "rebalance_improvement_bps": 53,
+    "min_required_improvement_bps": 15,
+    "is_within_target_band_after": false
+  },
+  "execution_strategy": {
+    "type": "DCA_SPLIT",
+    "total_value_usd": 50000.00,
+    "suggested_splits": 3,
+    "split_interval_hours": 6,
+    "estimated_total_slippage_saved_bps": 12
+  },
+  "dca_invalidation_rules": {
+    "each_split_must_be_resimulated": true,
+    "simulation_nonce_expiry_seconds": 3600,
+    "market_drift_tolerance_bps": 10,
+    "on_invalidation_action": "CANCEL_REMAINING_SPLITS",
+    "user_notification_required": true
+  },
+  "execution_control": {
+    "is_vetoed": false,
+    "execution_veto_reason": "NONE"
+  },
+  "liquidity_validation": {
+    "effective_route_liquidity_usd": 750000.00,
+    "pool_liquidity_score": 0.4,
+    "max_allowed_pct_of_aum": 0.05,
+    "ui_warning": "Liquidez moderada - operação limitada a 5% do portfólio"
+  },
+  "guardrails": {
+    "max_buy_value_usd": 6000.00,
+    "max_swap_value_usd": 6000.00,
+    "suggested_value_usd": 6000.00,
+    "cash_drag_override_active": true,
+    "active_buy_max_gate": 0.35,
+    "slippage_tolerance_pct": 0.005,
+    "slippage_veto_threshold_pct": 0.010
   },
   "financial_impact": {
-    "exit_costs_usd": 65.00,
-    "earnings_projection": {
-      "one_week_usd": 6.20,
-      "one_month_usd": 25.80,
-      "until_maturity_usd": 310.00
+    "estimated_costs_usd": 115.00,
+    "simulated_slippage_pct": 0.0022,
+    "baseline_inaction_comparison": {
+      "inaction_30d_gain_usd": 142.50,
+      "action_30d_gain_net_usd": 168.30,
+      "net_opportunity_gain_maturity_usd": 167.50
     }
   }
 }
     </pre>
 
-    <div class="warning">
-        <strong>Nota de Homologação:</strong> Como as PTs da Pendle convergem rigorosamente para a proporção de 1:1 com o ativo de lastro no vencimento, todos os cálculos cronológicos de ganho até o vencimento devem congelar a janela temporal baseando-se estritamente no timestamp Unix do campo <code>expiry</code> retornado pelo contrato inteligente da pool de destino.
+    <div class="footer-note">
+        Apêndice de Estilo: Constantes globais utilizam UPPER_CASE. Variáveis mutáveis locais em tempo de execução adotam snake_case. Condicionais de controle seguem o padrão clássico estruturado do bloco lógico de backend.
     </div>
 
 </body>
