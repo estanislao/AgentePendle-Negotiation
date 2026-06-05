@@ -48,4 +48,186 @@
         h2 { color: var(--primary-dark); margin-top: 40px; border-bottom: 2px solid var(--border); padding-bottom: 8px; font-size: 20px; }
         h3 { color: var(--primary); margin-top: 25px; font-size: 16px; }
         
-        code { background-color: #
+        code { background-color: #edf2f7; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #c53030; }
+        pre { background: var(--code-bg); color: var(--code-text); padding: 18px; border-radius: 8px; overflow-x: auto; font-size: 12px; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.5; }
+        
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; background-color: var(--bg-card); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        th, td { border: 1px solid var(--border); padding: 12px 16px; text-align: left; font-size: 14px; }
+        th { background-color: var(--primary-dark); color: #ffffff; }
+        tr:nth-child(even) { background-color: var(--zebra); }
+        
+        .note { background-color: var(--accent-light); border-left: 4px solid var(--accent); padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .warning { background-color: #fff7ed; border-left: 4px solid #ea580c; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .math-block { text-align: center; margin: 15px 0; padding: 12px; background-color: var(--math-bg); border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: bold; font-family: "Times New Roman", Times, serif; }
+    </style>
+</head>
+<body>
+
+    <div class="header-banner">
+        <div class="subtitle">Documento de Especificação Técnica de Requisitos e Sistema (SRS)</div>
+        <h1>Módulo de Negociações Meta-Orientado (PT Only)</h1>
+    </div>
+
+    <h2>1. Visão Geral da Arquitetura</h2>
+    <p>A arquitetura da nova aba <strong>"Negociações"</strong> foi projetada como um motor analítico e transacional reativo acoplado ao ecossistema Pendle na Arbitrum. O sistema opera em um fluxo unidirecional composto por três camadas lógicas:</p>
+    
+    <ul>
+        <li><strong>Camada de Ingestão de Dados (Data Ingestion):</strong> Consome em tempo real via RPC MEV-Shielded e Subgraph os saldos da carteira do usuário (AUM) e os dados de mercado das pools Pendle (Fixed APYs e Maturidades).</li>
+        <li><strong>Motor de Decisão e Otimização (Core Engine):</strong> Centraliza as regras matemáticas meta-orientadas e os limites de segurança estruturais (guardrails de 50% para Swap e 20% para Buy).</li>
+        <li><strong>Camada de Simulação e Projeção (UI/UX State):</strong> Renderiza o impacto futuro da carteira antes da assinatura on-chain, evidenciando o deslocamento do portfólio em direção ao alvo estipulado.</li>
+    </ul>
+
+    <pre>
+┌────────────────────────┐      ┌─────────────────────────┐      ┌────────────────────────┐
+│  Pendle API / Subgraph │      │   Carteira do Usuário   │      │   Configurações Core   │
+│ (Fixed APY / Maturity) │      │ (Saldos Atuais/Caixa/PT)│      │  (Meta Global: 13% aa) │
+└───────────┬────────────┘      └────────────┬────────────┘      └───────────┬────────────┘
+            │                                │                               │
+            └───────────────────────┬────────┴───────────────────────────────┘
+                                    ▼
+                      ┌─────────────────────────────┐
+                      │  NegotiationEngine (Core)   │
+                      │ ├─ Verificador de Guardrails│
+                      │ └─ Simulador de Impacto Meta│
+                      └─────────────┬───────────────┘
+                                    ▼
+                      ┌─────────────────────────────┐
+                      │ Dashboard / Interface UI    │
+                      │ (Cards Dinâmicos Swap/Buy)  │
+                      └─────────────────────────────┘
+    </pre>
+
+    <h2>2. Estrutura de Dados e Motores Cripto (Backend)</h2>
+    <p>O backend utiliza um motor analítico focado em **Média Ponderada de Rendimento** acoplado a regras rígidas de barreira (Circuit Breakers/Guardrails). O objetivo principal é manter o portfólio direcionado à meta de 13.00% aa.</p>
+
+    <h3>2.1. Regras de Negócio e Controle de Risco (Guardrails)</h3>
+    <ul>
+        <li><strong>Swap Gate:</strong> Limita o valor máximo da sugestão a <code>50%</code> do capital atualmente imobilizado em outras posições de PT. O motor varre e seleciona para descarte preferencial as pools com menor rendimento ou cujas curvas de decaimento de liquidez (PDS) degradaram.</li>
+        <li><strong>Buy Gate:</strong> Limita o valor sugerido para compras via capital livre (caixa/stablecoins) a no máximo <code>20%</code> do AUM total do portfólio.</li>
+    </ul>
+
+    <h3>2.2. Formulação Matemática do Motor</h3>
+    <p>O rendimento consolidado da carteira é recalculado dinamicamente a cada simulação através da fórmula:</p>
+    <div class="math-block">
+        APY_{Portfolio} = \sum_{i=1}^{n} \left( \frac{Valor\_Alocado_i}{AUM\_Total} \times Fixed\_APY_i \right)
+    </div>
+
+    <p>O <strong>Ganho Real Líquido ($\Delta_{Net}$)</strong> de uma troca de ativos calcula o diferencial de rendimento projetado até a data de vencimento, subtraindo os custos friccionais de rede:</p>
+    <div class="math-block">
+        Ganho\_Real = (Valor\_Swap \times APY_{Nova} \times t) - (Valor\_Swap \times APY_{Atual} \times t) - C_{Saída}
+    </div>
+    <p>Onde <code>t = Dias_Restantes_Maturidade / 365</code> e <code>C_Saída</code> representa o somatório do Gas da rede mais o slippage gerado na desmontagem.</p>
+
+    <h3>2.3. Lógica de Roteamento Multihop (Pendle Router)</h3>
+    <p>Como as pools do Pendle não possuem swaps diretos do tipo <code>PT_A ➔ PT_B</code>, o motor cripto monta e codifica em lote (Multicall) a seguinte rota atômica de contratos inteligentes:</p>
+    <pre>
+[PT_Origem] ➔ swapExactPtForToken() ➔ [Underlying Asset / SY] ➔ swapExactTokenForPt() ➔ [PT_Destino]
+    </pre>
+
+    <h2>3. Especificação dos Endpoints & Integrações (Pendle)</h2>
+    <p>O Agente precisará consumir as seguintes interfaces de dados estruturados para alimentar o motor analítico:</p>
+
+    <h3>3.1. Subgraph / API GraphQL da Pendle (Dados de Mercado)</h3>
+    <p>Para buscar as condições em tempo real dos mercados elegíveis da rede Arbitrum:</p>
+    <pre>
+query GetPendleMarkets {
+  markets(where: { chainId: 42161, isExpired: false }) {
+    id
+    ptAddress
+    expiry
+    ptPricing {
+      fixedApy
+      impliedApy
+    }
+    underlyingAsset {
+      id
+      symbol
+    }
+  }
+}
+    </pre>
+
+    <h3>3.2. Contrato Inteligente On-Chain (Pendle Router V4)</h3>
+    <p>Para estimar o custo exato de saída de uma PT e entrada na nova (simulação de Slippage), o backend deve fazer chamadas estáticas (<code>eth_call</code>) nos métodos de leitura do Router oficial (Bypass de transação):</p>
+    <ul>
+        <li><code>IAllActionV3.simRedeemPyToToken.call(...)</code>: Retorna o volume exato recebido do ativo base ao queimar a PT antiga.</li>
+        <li><code>IAllActionV3.simMintPyFromToken.call(...)</code>: Retorna a quantidade exata de novas PTs obtidas na pool recomendada com base nos tokens da primeira etapa.</li>
+    </ul>
+
+    <h2>4. Interface do Usuário (UI/UX Dashboard)</h2>
+    <p>A interface do dashboard apresenta indicadores macro orientados à meta do usuário e cards segregados para as operações.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Métrica de Portfólio</th>
+                <th>Estado Atual</th>
+                <th>Estado Projetado (Pós-Negociação)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>AUM Total</strong></td>
+                <td>$ 50,000.00</td>
+                <td>$ 49,935.00 <small>(Ajustado taxas de slippage)</small></td>
+            </tr>
+            <tr>
+                <td><strong>APY Consolidado da Carteira</strong></td>
+                <td><span style="color: var(--state-alert); font-weight: bold;">11.85% aa</span></td>
+                <td><span style="color: var(--state-success); font-weight: bold;">12.38% aa</span> <small>(+0.53% de impacto positivo)</small></td>
+            </tr>
+            <tr>
+                <td><strong>Meta Estabelecida</strong></td>
+                <td>13.00% aa</td>
+                <td>Diferença para o alvo: <strong>-0.62%</strong></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="note">
+        <strong>Card Interno: Operação de SWAP (Teto 50%)</strong><br>
+        🤖 Sugestão: Desmontar $10.000,00 da posição atual menos eficiente em PT-stETH para aplicar na pool recomendada PT-eETH.<br>
+        Projeções Incrementais: <strong>Semana:</strong> +$6.20 | <strong>Mês:</strong> +$25.80 | <strong>Até Vencimento:</strong> +$310.00
+    </div>
+
+    <div class="note">
+        <strong>Card Interno: Operação de BUY (Teto 20%)</strong><br>
+        🤖 Sugestão: Alocar $5.000,00 do saldo ocioso em caixa diretamente na pool recomendada PT-eETH (Fixed APY: 14.20%).
+    </div>
+
+    <h2>5. Estrutura de Resposta de Dados (Payload JSON de Produção)</h2>
+    <p>Estrutura padrão que o backend trafegará para atualizar os estados visuais da tela de negociações:</p>
+    <pre>
+{
+  "timestamp": 1780599000,
+  "operation_type": "SWAP",
+  "meta_target_apy": 0.13,
+  "current_portfolio_apy": 0.1185,
+  "projected_portfolio_apy": 0.1238,
+  "guardrails": {
+    "max_allowed_value_usd": 12500.00,
+    "suggested_value_usd": 10000.00,
+    "is_within_limits": true
+  },
+  "asset_routing": {
+    "source_pt": "0x_pt_steth_address",
+    "target_pt": "0x_pt_eeth_address",
+    "intermediate_token": "0x_weth_address"
+  },
+  "financial_impact": {
+    "exit_costs_usd": 65.00,
+    "earnings_projection": {
+      "one_week_usd": 6.20,
+      "one_month_usd": 25.80,
+      "until_maturity_usd": 310.00
+    }
+  }
+}
+    </pre>
+
+    <div class="warning">
+        <strong>Nota de Homologação:</strong> Como as PTs da Pendle convergem rigorosamente para a proporção de 1:1 com o ativo de lastro no vencimento, todos os cálculos cronológicos de ganho até o vencimento devem congelar a janela temporal baseando-se estritamente no timestamp Unix do campo <code>expiry</code> retornado pelo contrato inteligente da pool de destino.
+    </div>
+
+</body>
+</html>
