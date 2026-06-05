@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Especificação de Arquitetura - Aba Negociações (PT Only)</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; }
+        h1 { color: #1a365d; border-bottom: 2px solid #2b6cb0; padding-bottom: 10px; }
+        h2 { color: #2c5282; margin-top: 30px; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; }
+        h3 { color: #4a5568; }
+        code { background-color: #edf2f7; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+        pre { background: #1a202c; color: #edf2f7; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 0.9em; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #cbd5e0; padding: 12px; text-align: left; }
+        th { background-color: #f7fafc; color: #4a5568; }
+        .note { background-color: #ebf8ff; border-left: 4px solid #3182ce; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .warning { background-color: #fffaf0; border-left: 4px solid #dd6b20; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+    </style>
+</head>
+<body>
+
+    <h1>Documento de Arquitetura e Requisitos Técnicos</h1>
+    <p><strong>Funcionalidade:</strong> Nova Aba "Negociações" no Dashboard do Agente</p>
+    <p><strong>Escopo Técnico:</strong> Operações exclusivas com Principal Tokens (PT) da Pendle Finance</p>
+    <p><strong>Meta Global do Portfólio:</strong> 13.00% APY Anual</p>
+
+    <hr>
+
+    <h2>1. Visão Geral do Sistema</h2>
+    <p>O objetivo desta nova funcionalidade é permitir que o Agente recomende e execute movimentações otimizadas de rebalanceamento focadas em renda fixa DeFi (Pendle PT). O motor do robô deve ser guiado estritamente para buscar e manter o rendimento da carteira do usuário na meta de <strong>13% ao ano</strong>, calculando o impacto percentual de cada movimentação antes da assinatura da transação.</p>
+
+    <h2>2. Regras de Negócio e Limites de Risco (Guardrails)</h2>
+    <ul>
+        <li><strong>Operação de SWAP:</strong> O valor sugerido para a troca pode ser de no máximo <strong>50% do valor total alocado em outras pools de PT</strong> do portfólio.</li>
+        <li><strong>Operação de BUY (Compra):</strong> O valor sugerido para a compra de uma nova pool recomendada pode ser de no máximo <strong>20% do AUM Total</strong> do portfólio (capital em caixa/liquidez livre).</li>
+        <li><strong>Orientação à Meta:</strong> O Agente só deve sugerir ou validar operações que aproximem ou mantenham o portfólio na meta de 13% aa, alertando o usuário caso os custos de transação degradem a performance a ponto de afastar o usuário do objetivo.</li>
+    </ul>
+
+    <h2>3. Arquitetura Lógica das Funcionalidades</h2>
+
+    <h3>3.1. Funcionalidade: SWAP (Troca Otimizada de PTs)</h3>
+    <p>Para a pool recomendada pelo Agente, o sistema deve varrer as posições de PT atuais do usuário e estruturar o desinvestimento.</p>
+    
+    <div class="note">
+        <strong>Fórmula de Ganho Líquido Operacional:</strong><br>
+        O ganho projetado desconta os custos de slippage e gás da saída da posição antiga. <br>
+        <code>Ganho Real = (Valor Swap × APY Nova × t) - (Valor Swap × APY Atual × t) - Custos de Saída</code>
+    </div>
+
+    <p><strong>Lógica de roteamento de contratos Pendle (Multihop Backend):</strong></p>
+    <pre>
+[PT_Origem] ➔ Venda/Redeem via router ➔ [Underlying/SY Asset] ➔ Swap/Mint ➔ [PT_Destino (Recomendada)]
+    </pre>
+    <p><em>Desenvolvimento deve utilizar as funções <code>swapExactPtForToken</code> e <code>swapExactTokenForPt</code> do Pendle Router oficial.</em></p>
+
+    <h3>3.2. Funcionalidade: BUY (Nova Alocação)</h3>
+    <p>Módulo focado em utilizar a liquidez disponível em carteira (Stablecoins ou ETH) para comprar a PT recomendada, travando o teto de alocação de segurança em 20% do AUM total.</p>
+
+    <h2>4. Motor de Impacto na Meta (Cálculos de Portfólio)</h2>
+    <p>Antes de renderizar as opções para o usuário, o backend rodará o cálculo do APY Médio Ponderado da Carteira:</p>
+    <div class="note">
+        <strong>Cálculo do APY Consolidado do Portfólio:</strong><br>
+        <code>APY_Portfolio = Σ (Valor_Alocado_Ativo_i / AUM_Total) × APY_Fixo_Ativo_i</code>
+    </div>
+    <p>O sistema exibirá na interface o <strong>"Percentual Estimado Pós-Negociação"</strong>, atualizando o indicador macro da carteira caso a transação seja assinada.</p>
+
+    <h2>5. Interface do Usuário (UI/UX Sugerida para o Front-End)</h2>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Métrica de Portfólio</th>
+                <th>Estado Atual</th>
+                <th>Estado Projetado (Pós-Negociação)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>AUM Total</strong></td>
+                <td>$ 50,000.00</td>
+                <td>$ 49,935.00 <small>(Após custos de rede)</small></td>
+            </tr>
+            <tr>
+                <td><strong>APY Consolidado da Carteira</strong></td>
+                <td><span style="color: red; font-weight: bold;">11.85% aa</span></td>
+                <td><span style="color: green; font-weight: bold;">12.38% aa</span> <small>(+0.53% em direção à meta)</small></td>
+            </tr>
+            <tr>
+                <td><strong>Meta de Rendimento</strong></td>
+                <td>13.00% aa</td>
+                <td>Faltam apenas 0.62% para atingir a meta</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Detalhamento de Projeções de Tempo na Tela:</h3>
+    <ul>
+        <li><strong>Ganho na Semana:</strong> Exibe o ganho incremental bruto ajustado para 7 dias.</li>
+        <li><strong>Ganho no Mês:</strong> Exibe o ganho incremental bruto ajustado para 30 dias.</li>
+        <li><strong>Até o Vencimento:</strong> Calcula a janela exata de dias até a <code>Maturity Date</code> da PT de destino.</li>
+    </ul>
+
+    <div class="warning">
+        <strong>Aviso Importante para os Desenvolvedores:</strong> Como as PTs convertem em valor 1:1 com o ativo subjacente na data de vencimento, o cálculo de projeção de tempo "Até o Vencimento" deve ser baseado estritamente na data limite do contrato inteligente da nova pool selecionada.
+    </div>
+
+    <h2>6. Estrutura de Resposta de Dados (Exemplo de Payload JSON do Backend)</h2>
+    <pre>
+{
+  "operation_type": "SWAP",
+  "meta_target_apy": 0.13,
+  "current_portfolio_apy": 0.1185,
+  "projected_portfolio_apy": 0.1238,
+  "guardrails": {
+    "max_allowed_value_usd": 12500.00,
+    "suggested_value_usd": 10000.00,
+    "is_within_limits": true
+  },
+  "financial_impact": {
+    "exit_costs_usd": 65.00,
+    "earnings_projection": {
+      "one_week_usd": 6.20,
+      "one_month_usd": 25.80,
+      "until_maturity_usd": 310.00
+    }
+  }
+}
+    </pre>
+
+</body>
+</html>
